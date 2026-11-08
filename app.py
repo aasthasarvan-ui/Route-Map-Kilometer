@@ -247,4 +247,32 @@ if uploaded_file:
             
             for sheet in excel_file.sheet_names:
                 sheet_upper = sheet.strip().upper()
-                df_raw = pd.read_excel(uploaded_file, sheet_name=sheet
+                df_raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
+                
+                if "ROUTE" in sheet_upper and sheet_upper not in ["ROUTE INDEX", "ROUTE #"]:
+                    s_name, processed_df, logs = process_single_sheet_strict_h(sheet, df_raw, api_key_input)
+                    all_logs.extend(logs)
+                else:
+                    s_name, processed_df = sheet, df_raw
+                    
+                ws = wb.create_sheet(title=s_name)
+                
+                for row in processed_df.itertuples(index=False):
+                    row_vals = [None if pd.isna(val) else val for val in row]
+                    ws.append(row_vals)
+
+            wb.save(output)
+            output.seek(0)
+            
+            if all_logs:
+                with st.expander("⚠️ API Debug Logs (Click to expand)"):
+                    for log_msg in all_logs:
+                        st.write(f"- {log_msg}")
+            
+            st.success("✅ Process Completed!")
+            st.download_button(
+                label="📥 Download Updated Excel Sheet",
+                data=output,
+                file_name="Updated_Route_Plan_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
