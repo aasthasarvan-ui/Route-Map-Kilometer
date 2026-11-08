@@ -9,68 +9,34 @@ import io
 
 # Page Config
 st.set_page_config(
-    page_title="ERP Route Planner Engine",
+    page_title="ERP Route Sheet Highway Planner",
     page_icon="🚚",
     layout="wide"
 )
 
-# Base Depot (Paras Nutritions Pvt Ltd, Moga)
+# Base Origin Depot (Paras Nutritions Pvt Ltd, Moga)
 BASE_DEPOT = "Paras Nutritions Pvt Ltd, Road, Moga, Punjab, India"
 BASE_LAT = 30.8165
 BASE_LON = 75.1717
 
-# Exact High-Precision Punjab Village & District Spatial Database
-PUNJAB_EXACT_DB = {
-    # MOGA DISTRICT
-    "MADO KE": {"dist": "Moga", "km": "14.2 KM"},
-    "MADOKE": {"dist": "Moga", "km": "14.2 KM"},
-    "GHOLIA": {"dist": "Moga", "km": "22.8 KM"},
-    "GHOLIA KHURAD": {"dist": "Moga", "km": "22.8 KM"},
-    "GHOLIAN": {"dist": "Moga", "km": "22.8 KM"},
-    "HARDIP S SADDAR GHOLIAN KALAN": {"dist": "Moga", "km": "22.8 KM"},
-    "DALA": {"dist": "Moga", "km": "18.5 KM"},
-    "DALLA": {"dist": "Moga", "km": "18.5 KM"},
-    "CHARIK": {"dist": "Moga", "km": "16.1 KM"},
-    "BADNI KALAN": {"dist": "Moga", "km": "28.4 KM"},
-    "RANIAN": {"dist": "Moga", "km": "21.6 KM"},
-    "BUTTAR": {"dist": "Moga", "km": "17.7 KM"},
-    "DAULATPURA": {"dist": "Moga", "km": "11.5 KM"},
-    "DAROLI": {"dist": "Moga", "km": "15.3 KM"},
+# -----------------------------------------------------------------------------
+# PURE DYNAMIC LOGIC & LIVE GEOCODING ENGINES (ZERO HARDCODED DATA)
+# -----------------------------------------------------------------------------
 
-    # FIROZPUR DISTRICT
-    "MAKHU": {"dist": "Firozpur", "km": "34.8 KM"},
-    "MAJO K MAKHU": {"dist": "Firozpur", "km": "34.8 KM"},
-    "SURJITPURA": {"dist": "Firozpur", "km": "44.7 KM"},
-    "LEHRABEAT": {"dist": "Firozpur", "km": "52.3 KM"},
-    "BHANGALA": {"dist": "Firozpur", "km": "48.2 KM"},
-
-    # FARIDKOT DISTRICT
-    "SARAWAN": {"dist": "Faridkot", "km": "58.2 KM"},
-    "JAITO": {"dist": "Faridkot", "km": "62.4 KM"},
-
-    # BATHINDA DISTRICT
-    "DHAPALI": {"dist": "Bathinda", "km": "41.2 KM"},
-    "PHOOL": {"dist": "Bathinda", "km": "43.5 KM"},
-    "BHUCHO": {"dist": "Bathinda", "km": "56.4 KM"},
-
-    # SRI MUKTSAR SAHIB
-    "KOT BHAI": {"dist": "Sri Muktsar Sahib", "km": "72.4 KM"},
-    "RUPANA": {"dist": "Sri Muktsar Sahib", "km": "68.9 KM"},
-
-    # BARNALA & MANSA
-    "BADRA": {"dist": "Barnala", "km": "48.6 KM"},
-    "ATLA KALAN": {"dist": "Mansa", "km": "78.4 KM"}
-}
-
-def clean_vpo_name(party_name):
-    """Dynamic ERP Party Name RegEx Cleaner."""
+def clean_vpo_name_dynamic(party_name):
+    """
+    Pure Dynamic RegEx Parser to extract clean VPO name from complex ERP strings.
+    Strips noise like LF-9707, AG 473, R-12, RT15, farmer names, etc.
+    """
     if not isinstance(party_name, str) or not party_name.strip():
         return ""
     
     txt = party_name.strip()
-    # Strip ERP noise codes
+    
+    # 1. Remove ERP System Noise codes
     txt = re.sub(r'[\,\s\/]+(LF[-\s]*\d+|AG\s*\d+|R[-]*\d+|RT\d+|\d{4,}).*$', '', txt, flags=re.IGNORECASE)
     
+    # 2. Extract after VPO / V.P.O. if present
     pos_vpo = re.search(r'VPO[-.\s]*', txt, flags=re.IGNORECASE)
     if pos_vpo:
         raw_vpo = txt[pos_vpo.end():].strip('.')
@@ -81,6 +47,7 @@ def clean_vpo_name(party_name):
     else:
         raw_vpo = txt
         
+    # 3. Dynamic word filtering (Removes code suffixes)
     words = raw_vpo.split()
     clean_words = []
     for w in words:
@@ -93,39 +60,35 @@ def clean_vpo_name(party_name):
     return res.title() if res else party_name.title()
 
 
-def get_live_geocoding_and_km(vpo_name, party_text, api_key=""):
-    """Exact Village Geocoding & Highway Distance Calculator."""
+def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
+    """
+    100% Dynamic Engine (No prefilled arrays).
+    Fetches real-time District Name and exact driving KM using Google Maps API 
+    or OpenStreetMap + OSRM Live Highway Router.
+    """
     if not vpo_name:
-        return "Moga", "18.5 KM", ""
+        return "Unknown", "N/A", ""
 
-    u_vpo = vpo_name.upper().strip()
+    district_name = "Punjab"
+    driving_km = "N/A"
 
-    # Step 1: Exact Master Regional DB Lookup (Guarantees 100% Accuracy)
-    for key, val in PUNJAB_EXACT_DB.items():
-        if key in u_vpo or u_vpo in key:
-            dist = val["dist"]
-            km = val["km"]
-            full_addr = f"{vpo_name}, District {dist}, Punjab, India"
-            link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
-            return dist, km, link
-
-    district_name = "Moga"
-    driving_km = "22.5 KM"
-
-    # Step 2: Google Maps API (If API Key provided in Sidebar)
+    # METHOD A: Live Google Maps API (If API Key provided in sidebar)
     if api_key and api_key.strip():
         try:
-            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Moga, Punjab, India')}&key={api_key}"
-            g_resp = requests.get(geo_url, timeout=3).json()
+            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Punjab, India')}&key={api_key}"
+            g_resp = requests.get(geo_url, timeout=4).json()
+            
             if g_resp.get("status") == "OK" and g_resp.get("results"):
                 for component in g_resp["results"][0].get("address_components", []):
-                    if "administrative_area_level_2" in component.get("types", []):
+                    types = component.get("types", [])
+                    if "administrative_area_level_2" in types:
                         district_name = component["long_name"].replace("District", "").strip().title()
                         break
             
             full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
+            
             dist_url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={urllib.parse.quote(BASE_DEPOT)}&destinations={urllib.parse.quote(full_addr)}&mode=driving&key={api_key}"
-            d_resp = requests.get(dist_url, timeout=3).json()
+            d_resp = requests.get(dist_url, timeout=4).json()
             if d_resp.get("status") == "OK" and d_resp.get("rows"):
                 elements = d_resp["rows"][0].get("elements", [])
                 if elements and elements[0].get("status") == "OK":
@@ -136,21 +99,44 @@ def get_live_geocoding_and_km(vpo_name, party_text, api_key=""):
         except Exception:
             pass
 
-    # Step 3: Dynamic Spatial Calculation Fallback for New Unlisted Villages
-    name_hash = sum(ord(c) for c in vpo_name)
-    calc_km = round(14.0 + (name_hash % 38) + 0.5, 1)
-    driving_km = f"{calc_km} KM"
+    # METHOD B: Live OpenStreetMap Geocoding + Live OSRM Highway Engine (Pure Free API)
+    try:
+        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(vpo_name + ', Punjab, India')}&format=json&addressdetails=1&limit=1"
+        headers = {'User-Agent': 'PureDynamicERPRoutePlanner/4.0'}
+        res = requests.get(osm_url, headers=headers, timeout=3).json()
+        
+        if res and len(res) > 0:
+            addr = res[0].get("address", {})
+            
+            # Dynamic District Property Extraction Logic
+            raw_d = addr.get("county", addr.get("state_district", addr.get("district", "")))
+            if raw_d:
+                district_name = raw_d.replace("District", "").replace("Tehsil", "").strip().title()
+            
+            dest_lat = float(res[0]["lat"])
+            dest_lon = float(res[0]["lon"])
+            
+            # Real Highway Driving Distance calculation via OSRM Web Engine
+            osrm_url = f"http://router.project-osrm.org/route/v1/driving/{BASE_LON},{BASE_LAT};{dest_lon},{dest_lat}?overview=false"
+            osrm_res = requests.get(osrm_url, timeout=3).json()
+            if osrm_res.get("routes"):
+                meters = osrm_res["routes"][0]["distance"]
+                driving_km = f"{round(meters / 1000.0, 1)} KM"
+    except Exception:
+        pass
 
+    # Dynamic fallback string format if OSM search fails for very small village
     full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
     maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
     return district_name, driving_km, maps_link
 
 
 def process_single_sheet(sheet_name, df, api_key=""):
-    """Single Sheet Processing Engine."""
+    """Multi-Threaded Dynamic Processor for Route Sheets."""
     party_col = None
     header_idx = None
     
+    # Dynamic Column Auto-Detection Logic
     for idx, row in df.head(10).iterrows():
         for col in df.columns:
             val = str(row[col]).upper()
@@ -171,8 +157,8 @@ def process_single_sheet(sheet_name, df, api_key=""):
     def fetch_task(party):
         if not party or str(party).upper() == "TOTAL":
             return
-        clean_vpo = clean_vpo_name(str(party))
-        dist, km, link = get_live_geocoding_and_km(clean_vpo, str(party), api_key)
+        clean_vpo = clean_vpo_name_dynamic(str(party))
+        dist, km, link = dynamic_live_geocoding_and_km(clean_vpo, str(party), api_key)
         cache[party] = {
             "clean_vpo": clean_vpo,
             "district": dist,
@@ -180,6 +166,7 @@ def process_single_sheet(sheet_name, df, api_key=""):
             "link": link
         }
 
+    # Parallel Processing Threads for Ultra-Fast Batching
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(fetch_task, unique_parties)
 
@@ -191,7 +178,9 @@ def process_single_sheet(sheet_name, df, api_key=""):
             c = cache[party]
             vpo_list.append(c["clean_vpo"])
             dist_list.append(c["district"])
-            addr_list.append(f"{c['clean_vpo']}, District {c['district']}, Punjab, India")
+            
+            full_address_text = f"{c['clean_vpo']}, District {c['district']}, Punjab, India"
+            addr_list.append(full_address_text)
             km_list.append(c["km"])
             
             # Excel Native Hyperlink Formula
@@ -212,16 +201,21 @@ def process_single_sheet(sheet_name, df, api_key=""):
 
     return sheet_name, data_df
 
-# Streamlit UI App
+# -----------------------------------------------------------------------------
+# STREAMLIT UI DASHBOARD
+# -----------------------------------------------------------------------------
+
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.sidebar.header("Configuration")
-api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password")
+st.caption("Pure Dynamic Geocoding Architecture — 0% Hardcoded Data")
+
+st.sidebar.header("Settings")
+api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Enter key for Google Maps driving routes or leave blank for Free OpenStreetMap Routing Engine")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing Route Sheets..."):
+        with st.spinner("Processing Route Sheets dynamically across Live Geocoding API..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
@@ -246,7 +240,7 @@ if uploaded_file:
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! All District Names & Driving KM Corrected.")
+            st.success("✅ Complete! All ERP sheets dynamically processed.")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
