@@ -14,28 +14,33 @@ st.set_page_config(
     layout="wide"
 )
 
-# Base Origin Depot (Paras Nutritions Pvt Ltd, Moga)
+# Base Origin Depot Coordinates (Paras Nutritions Pvt Ltd, Moga)
 BASE_DEPOT = "Paras Nutritions Pvt Ltd, Road, Moga, Punjab, India"
 BASE_LAT = 30.8165
 BASE_LON = 75.1717
 
 # -----------------------------------------------------------------------------
-# DYNAMIC REGEX & LIVE GEOCODING ENGINES
+# PURE DYNAMIC LOGIC & LIVE GEOCODING ENGINES (ZERO PREFILLED/HARDCODED DATA)
 # -----------------------------------------------------------------------------
 
-def clean_vpo_name_dynamic(party_name):
-    """Dynamic parser to extract village name from complex ERP strings."""
-    if not isinstance(party_name, str) or not party_name.strip():
+def extract_pure_village_name_dynamic(cell_value):
+    """
+    Pure Dynamic RegEx Parser.
+    Strips noise like LF-9707, AG 473, R-12, RT15, farmer names, etc.
+    Extracts purely the Village Name without hardcoded lookup lists.
+    """
+    if not isinstance(cell_value, str) or not cell_value.strip():
         return ""
     
-    txt = party_name.strip()
+    txt = cell_value.strip()
     
-    # Clean ERP noise codes (LF-9707, AG 473, R-12, RT15, /142044, etc.)
+    # 1. Remove ERP System Noise codes (e.g. LF-9707, AG 473, R-12, RT15, numbers)
     txt = re.sub(r'[\,\s\/]+(LF[-\s]*\d+|AG\s*\d+|R[-]*\d+|RT\d+|\d{4,}).*$', '', txt, flags=re.IGNORECASE)
     
+    # 2. Extract text after VPO / V.P.O. keyword if present
     pos_vpo = re.search(r'VPO[-.\s]*', txt, flags=re.IGNORECASE)
     if pos_vpo:
-        raw_vpo = txt[pos_vpo.end():].strip('.')
+        raw_vpo = txt[pos_vpo.end():].strip('.- ')
     elif ',' in txt:
         raw_vpo = txt.split(',')[0]
     elif '/' in txt:
@@ -43,6 +48,7 @@ def clean_vpo_name_dynamic(party_name):
     else:
         raw_vpo = txt
         
+    # 3. Dynamic word filtering (Removes noise suffixes)
     words = raw_vpo.split()
     clean_words = []
     for w in words:
@@ -52,13 +58,15 @@ def clean_vpo_name_dynamic(party_name):
         clean_words.append(w)
         
     res = " ".join(clean_words).strip()
-    return res.title() if res else party_name.title()
+    return res.title() if res else cell_value.title()
 
 
-def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
+def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
     """
-    Fetches real-time District Name and Highway Driving KM via API 
-    or OpenStreetMap + OSRM Live Highway Router.
+    100% Live Dynamic Resolver (Zero Hardcoding).
+    Resolves real-time District Name and live continuous driving KM via:
+    1. Live Google Maps API (if key provided in sidebar)
+    2. Live OpenStreetMap Geocoding + OSRM Highway Distance Matrix (Free Engine)
     """
     if not vpo_name:
         return "Unknown", "N/A", ""
@@ -66,19 +74,14 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     district_name = "Punjab"
     driving_km = "N/A"
 
-    # 1. Check if district explicitly present after comma
-    if ',' in party_text:
-        parts = party_text.split(',')
-        if len(parts) > 1:
-            cand = parts[1].strip()
-            if "LF" not in cand.upper() and "R-" not in cand.upper() and len(cand) > 2:
-                district_name = cand.split()[0].title()
+    # Dynamic search string scoped to Punjab context to eliminate ambiguity
+    search_address = f"{vpo_name}, Punjab, India"
 
-    # METHOD A: Live Google Maps API (If API Key Provided)
+    # METHOD A: Live Google Maps API Engine (If API Key provided)
     if api_key and api_key.strip():
         try:
-            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Punjab, India')}&key={api_key}"
-            g_resp = requests.get(geo_url, timeout=4).json()
+            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(search_address)}&key={api_key}"
+            g_resp = requests.get(geo_url, timeout=5).json()
             
             if g_resp.get("status") == "OK" and g_resp.get("results"):
                 for component in g_resp["results"][0].get("address_components", []):
@@ -89,7 +92,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
             
             full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
             dist_url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={urllib.parse.quote(BASE_DEPOT)}&destinations={urllib.parse.quote(full_addr)}&mode=driving&key={api_key}"
-            d_resp = requests.get(dist_url, timeout=4).json()
+            d_resp = requests.get(dist_url, timeout=5).json()
             
             if d_resp.get("status") == "OK" and d_resp.get("rows"):
                 elements = d_resp["rows"][0].get("elements", [])
@@ -101,11 +104,11 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
         except Exception:
             pass
 
-    # METHOD B: Live OpenStreetMap + OSRM Engine
+    # METHOD B: Live OpenStreetMap + Live OSRM Highway Matrix Engine (100% Free Dynamic API)
     try:
-        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(vpo_name + ', Punjab, India')}&format=json&addressdetails=1&limit=1"
-        headers = {'User-Agent': 'ERPRoutePlannerEngine/9.0'}
-        res = requests.get(osm_url, headers=headers, timeout=3).json()
+        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_address)}&format=json&addressdetails=1&limit=1"
+        headers = {'User-Agent': 'PureDynamicERPRoutePlanner/11.0'}
+        res = requests.get(osm_url, headers=headers, timeout=4).json()
         
         if res and len(res) > 0:
             addr = res[0].get("address", {})
@@ -116,30 +119,14 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
             dest_lat = float(res[0]["lat"])
             dest_lon = float(res[0]["lon"])
             
+            # Live Highway Driving Distance via OSRM Server
             osrm_url = f"http://router.project-osrm.org/route/v1/driving/{BASE_LON},{BASE_LAT};{dest_lon},{dest_lat}?overview=false"
-            osrm_res = requests.get(osrm_url, timeout=3).json()
+            osrm_res = requests.get(osrm_url, timeout=4).json()
             if osrm_res.get("routes"):
                 meters = osrm_res["routes"][0]["distance"]
                 driving_km = f"{round(meters / 1000.0, 1)} KM"
     except Exception:
         pass
-
-    # METHOD C: Dynamic Fallback Resolution
-    if district_name == "Punjab":
-        u_v = vpo_name.upper()
-        if any(k in u_v for k in ["MAKHU", "MAJO", "BURJ MAKHAN", "PINDI", "MATTAR", "SURJITPURA"]):
-            district_name = "Firozpur"
-        elif any(k in u_v for k in ["SARAWAN", "JAITO"]):
-            district_name = "Faridkot"
-        elif any(k in u_v for k in ["DHAPALI", "PHOOL"]):
-            district_name = "Bathinda"
-        else:
-            district_name = "Moga"
-
-    if driving_km == "N/A":
-        hash_val = sum(ord(c) for c in vpo_name)
-        calc_km = round(14.0 + (hash_val % 45) + 0.8, 1)
-        driving_km = f"{calc_km} KM"
 
     full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
     maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
@@ -149,24 +136,23 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
 def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     """
     STRICT COLUMN H BASE PROCESSOR:
-    Extracts Party / Village Names STRICTLY from Column H (Index 7).
+    Extracts Party / Village Names STRICTLY from Column H (Index 7) with 0% hardcoded data.
     """
     if df_raw.empty or df_raw.shape[1] < 8:
         return sheet_name, df_raw
 
-    # Column H is Index 7 (A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7)
-    party_col_idx = 7
+    party_col_idx = 7 # Column H (0-indexed)
     header_row_idx = None
     
-    # Detect the Header Row index by checking Column H entries
-    for r_idx in range(min(20, len(df_raw))):
+    # Locate Header Row in Column H
+    for r_idx in range(min(25, len(df_raw))):
         val = str(df_raw.iloc[r_idx, party_col_idx]).upper().strip()
         if any(k in val for k in ["SOLD TO PARTY", "FARMER NAME", "PARTY NAME", "CUSTOMER", "SHIP TO"]):
             header_row_idx = r_idx
             break
             
     if header_row_idx is None:
-        header_row_idx = 3 # Standard ERP Header Row
+        header_row_idx = 3
 
     data_df = df_raw.copy()
     num_rows = len(data_df)
@@ -177,14 +163,14 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     km_list = [""] * num_rows
     link_list = [""] * num_rows
 
-    # Write Headers at header_row_idx
+    # Column Headers Setup
     vpo_list[header_row_idx] = "Extracted Village (VPO)"
     dist_list[header_row_idx] = "District Name"
     addr_list[header_row_idx] = "Exact Google Maps Address"
     km_list[header_row_idx] = "Dist from Base (KM)"
     link_list[header_row_idx] = "Google Maps Directions Link"
 
-    # Read values strictly from Column H below header row
+    # Extract Unique Parties strictly from Column H
     row_party_map = {}
     unique_parties = set()
 
@@ -199,9 +185,9 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     cache = {}
 
     def fetch_task(party):
-        clean_vpo = clean_vpo_name_dynamic(party)
+        clean_vpo = extract_pure_village_name_dynamic(party)
         if clean_vpo:
-            dist, km, link = dynamic_live_geocoding_engine(clean_vpo, party, api_key)
+            dist, km, link = live_dynamic_spatial_geocoder(clean_vpo, party, api_key)
             cache[party] = {
                 "clean_vpo": clean_vpo,
                 "district": dist,
@@ -209,12 +195,12 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
                 "link": link
             }
 
-    # Parallel Execution Engine
+    # Parallel Geocoding Threads
     if unique_parties:
         with ThreadPoolExecutor(max_workers=10) as executor:
             executor.map(fetch_task, list(unique_parties))
 
-    # Write Data Directly to Rows
+    # Populate Rows Directly
     for r_idx, party_val in row_party_map.items():
         if party_val in cache:
             c = cache[party_val]
@@ -237,16 +223,16 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("Strict Column H Parser Engine — Guaranteed Data Fill")
+st.caption("100% Pure Dynamic Logic Engine — 0% Hardcoded Data")
 
 st.sidebar.header("Configuration")
-api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password")
+api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Add key for Google Maps live matrix or leave blank for OpenStreetMap Free Engine")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Extracting Data Directly from Column H..."):
+        with st.spinner("Processing ERP Sheets dynamically across Live Highway API..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
@@ -271,7 +257,7 @@ if uploaded_file:
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! All rows populated directly from Column H.")
+            st.success("✅ Complete! Dynamically processed without any prefilled/hardcoded data.")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
