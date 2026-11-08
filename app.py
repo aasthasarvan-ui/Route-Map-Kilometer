@@ -7,7 +7,7 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import io
 
-# Streamlit Page Configuration
+# Streamlit Configuration
 st.set_page_config(
     page_title="ERP Route Sheet Highway Planner Engine",
     page_icon="🚚",
@@ -64,20 +64,19 @@ def live_google_maps_geocoder(vpo_name, full_cell_text, api_key=""):
     Resolves exact District Name (e.g., Firozpur) and real driving distance (e.g., 87.9 KM).
     """
     if not vpo_name:
-        return "Unknown", "N/A", ""
+        return "Unknown", "N/A", "", "Empty VPO input"
 
     district_name = "Punjab"
     driving_km = "N/A"
+    err_status = "OK"
 
-    # Scoped Query to eliminate ambiguity
     search_address = f"{vpo_name}, Punjab, India"
 
-    # Method 1: Google Maps API Processing
     if api_key and api_key.strip():
         try:
-            # 1. Fetch Exact District Name via Geocoding API
+            # 1. Fetch District Name via Geocoding API
             geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(search_address)}&key={api_key}"
-            g_resp = requests.get(geo_url, timeout=5).json()
+            g_resp = requests.get(geo_url, timeout=6).json()
             
             if g_resp.get("status") == "OK" and g_resp.get("results"):
                 for component in g_resp["results"][0].get("address_components", []):
@@ -85,27 +84,33 @@ def live_google_maps_geocoder(vpo_name, full_cell_text, api_key=""):
                     if "administrative_area_level_2" in types:
                         district_name = component["long_name"].replace("District", "").strip().title()
                         break
+            else:
+                err_status = f"Geocoding API Status: {g_resp.get('status', 'FAILED')}"
+
+            full_addr = f"{vpo_name}, District {district_name}, Punjab, India" if district_name != "Punjab" else search_address
             
-            full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
-            
-            # 2. Fetch Highway Driving KM via Distance Matrix API
+            # 2. Fetch Driving KM via Distance Matrix API
             dist_url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={urllib.parse.quote(BASE_DEPOT)}&destinations={urllib.parse.quote(full_addr)}&mode=driving&key={api_key}"
-            d_resp = requests.get(dist_url, timeout=5).json()
+            d_resp = requests.get(dist_url, timeout=6).json()
             
             if d_resp.get("status") == "OK" and d_resp.get("rows"):
                 elements = d_resp["rows"][0].get("elements", [])
                 if elements and elements[0].get("status") == "OK":
                     driving_km = elements[0]["distance"]["text"].upper()
+                else:
+                    err_status = f"Distance Matrix Element Status: {elements[0].get('status', 'FAILED') if elements else 'NO_ELEMENTS'}"
+            else:
+                err_status = f"Distance Matrix API Status: {d_resp.get('status', 'FAILED')}"
                     
             maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
-            return district_name, driving_km, maps_link
-        except Exception:
-            pass
+            return district_name, driving_km, maps_link, err_status
+        except Exception as e:
+            err_status = f"Google API Exception: {str(e)}"
 
-    # Method 2: Dynamic OpenStreetMap Fallback
+    # Method 2: Dynamic OpenStreetMap Fallback if Key isn't provided
     try:
         osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_address)}&format=json&addressdetails=1&limit=1"
-        headers = {'User-Agent': 'DynamicGoogleAPIRoutePlanner/15.0'}
+        headers = {'User-Agent': 'DynamicGoogleAPIRoutePlanner/16.0'}
         res = requests.get(osm_url, headers=headers, timeout=4).json()
         
         if res and len(res) > 0:
@@ -127,7 +132,7 @@ def live_google_maps_geocoder(vpo_name, full_cell_text, api_key=""):
 
     full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
     maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
-    return district_name, driving_km, maps_link
+    return district_name, driving_km, maps_link, "NO_API_KEY_ENTERED"
 
 
 def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
@@ -136,7 +141,7 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     Extracts village names strictly from Column H with zero hardcoded lookup tables.
     """
     if df_raw.empty or df_raw.shape[1] < 8:
-        return sheet_name, df_raw
+        return sheet_name, df_raw, []
 
     party_col_idx = 7 # Column H (0-indexed)
     header_row_idx = None
@@ -160,7 +165,6 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     km_list = [""] * num_rows
     link_list = [""] * num_rows
 
-    # Setup Header Titles
     vpo_list[header_row_idx] = "Extracted Village (VPO)"
     dist_list[header_row_idx] = "District Name"
     addr_list[header_row_idx] = "Exact Google Maps Address"
@@ -179,24 +183,25 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
                 unique_parties.add(p_str)
 
     cache = {}
+    api_logs = []
 
     def fetch_task(party):
         clean_vpo = extract_pure_village_name_dynamic(party)
         if clean_vpo:
-            dist, km, link = live_google_maps_geocoder(clean_vpo, party, api_key)
+            dist, km, link, status = live_google_maps_geocoder(clean_vpo, party, api_key)
             cache[party] = {
                 "clean_vpo": clean_vpo,
                 "district": dist,
                 "km": km,
                 "link": link
             }
+            if status != "OK":
+                api_logs.append(f"{clean_vpo}: {status}")
 
-    # Parallel Dynamic Geocoding Threads
     if unique_parties:
         with ThreadPoolExecutor(max_workers=10) as executor:
             executor.map(fetch_task, list(unique_parties))
 
-    # Populate Data to DataFrame
     for r_idx, party_val in row_party_map.items():
         if party_val in cache:
             c = cache[party_val]
@@ -212,7 +217,7 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     data_df["Dist from Base (KM)"] = km_list
     data_df["Google Maps Directions Link"] = link_list
 
-    return sheet_name, data_df
+    return sheet_name, data_df, api_logs
 
 # -----------------------------------------------------------------------------
 # STREAMLIT USER DASHBOARD
@@ -222,12 +227,15 @@ st.title("🚚 ERP Route Sheet Highway Planner Engine")
 st.caption("100% Dynamic Engine — Strictly Column H Target")
 
 st.sidebar.header("Configuration")
-api_key_input = st.sidebar.text_input("Enter Google Maps API Key:", type="password", help="Enter your Google Maps API key to fetch exact Google driving routes and districts")
+api_key_input = st.sidebar.text_input("Enter Google Maps API Key:", type="password")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
+        if not api_key_input:
+            st.warning("⚠️ Warning: Google Maps API key enter nahi kiya hai. OpenStreetMap fallback run ho raha hai, isse rural villages ke distance N/A ho sakte hain.")
+            
         with st.spinner("Processing ERP Sheets dynamically across Google Maps API..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
@@ -235,28 +243,8 @@ if uploaded_file:
             wb = openpyxl.Workbook()
             wb.remove(wb.active)
             
+            all_logs = []
+            
             for sheet in excel_file.sheet_names:
                 sheet_upper = sheet.strip().upper()
-                df_raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
-                
-                if "ROUTE" in sheet_upper and sheet_upper not in ["ROUTE INDEX", "ROUTE #"]:
-                    s_name, processed_df = process_single_sheet_strict_h(sheet, df_raw, api_key_input)
-                else:
-                    s_name, processed_df = sheet, df_raw
-                    
-                ws = wb.create_sheet(title=s_name)
-                
-                for row in processed_df.itertuples(index=False):
-                    row_vals = [None if pd.isna(val) else val for val in row]
-                    ws.append(row_vals)
-
-            wb.save(output)
-            output.seek(0)
-            
-            st.success("✅ Process Completed!")
-            st.download_button(
-                label="📥 Download Updated Excel Sheet",
-                data=output,
-                file_name="Updated_Route_Plan_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                df_raw = pd.read_excel(uploaded_file, sheet_name=sheet
