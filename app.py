@@ -121,35 +121,31 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     return district_name, driving_km, maps_link
 
 
-def process_single_sheet_robust(sheet_name, df, api_key=""):
-    """Robust Sheet Processing Pipeline (Prevents Empty Data Drops)."""
-    if df.empty:
-        return sheet_name, df
+def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
+    """Robust Sheet Processing Engine."""
+    if df_raw.empty:
+        return sheet_name, df_raw
 
-    party_col = None
+    party_col_idx = None
     header_row_idx = None
     
-    # Robust Header & Party Name Column Auto-Detector
-    for r_idx in range(min(15, len(df))):
-        row_vals = [str(x).upper() for x in df.iloc[r_idx].values]
+    # Deep Grid Scan to find Party Name Column
+    for r_idx in range(min(20, len(df_raw))):
+        row_vals = [str(x).upper() for x in df_raw.iloc[r_idx].values]
         for c_idx, val in enumerate(row_vals):
             if any(k in val for k in ["SOLD TO PARTY NAME", "FARMER NAME", "SOLD-TO PARTY NAME", "PARTY NAME", "SHIP TO"]):
-                party_col = df.columns[c_idx]
+                party_col_idx = c_idx
                 header_row_idx = r_idx
                 break
-        if party_col is not None:
+        if party_col_idx is not None:
             break
 
-    if party_col is None:
-        # Return sheet unmodified if it's not a standard ERP party route sheet
-        return sheet_name, df
+    if party_col_idx is None:
+        return sheet_name, df_raw
 
-    # Prepare Data Frame
-    data_df = df.copy()
-    
-    # Read values from party column safely
-    parties = data_df[party_col].dropna().astype(str).tolist()
-    unique_parties = list(set([p.strip() for p in parties if p.strip() and p.strip().upper() != "TOTAL"]))
+    # Extract Unique Parties safely
+    raw_parties = df_raw.iloc[header_row_idx + 1:, party_col_idx].dropna().astype(str).tolist()
+    unique_parties = list(set([p.strip() for p in raw_parties if p.strip() and p.strip().upper() != "TOTAL"]))
 
     cache = {}
 
@@ -167,27 +163,32 @@ def process_single_sheet_robust(sheet_name, df, api_key=""):
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(fetch_task, unique_parties)
 
-    vpo_list, dist_list, addr_list, km_list, link_list = [], [], [], [], []
+    # Rebuild Sheet DataFrame with New Columns Added to the Right
+    data_df = df_raw.copy()
+    
+    vpo_list = [""] * len(data_df)
+    dist_list = [""] * len(data_df)
+    addr_list = [""] * len(data_df)
+    km_list = [""] * len(data_df)
+    link_list = [""] * len(data_df)
 
-    for idx, row in data_df.iterrows():
-        party_val = str(row[party_col]).strip() if pd.notna(row[party_col]) else ""
-        
-        # Header or Total Skip Logic
+    # Fill Headers at header_row_idx
+    vpo_list[header_row_idx] = "Extracted Village (VPO)"
+    dist_list[header_row_idx] = "District Name"
+    addr_list[header_row_idx] = "Exact Google Maps Address"
+    km_list[header_row_idx] = "Dist from Base (KM)"
+    link_list[header_row_idx] = "Google Maps Directions Link"
+
+    # Fill Data Rows
+    for r_idx in range(header_row_idx + 1, len(data_df)):
+        party_val = str(data_df.iloc[r_idx, party_col_idx]).strip() if pd.notna(data_df.iloc[r_idx, party_col_idx]) else ""
         if party_val in cache and party_val.upper() != "TOTAL":
             c = cache[party_val]
-            vpo_list.append(c["clean_vpo"])
-            dist_list.append(c["district"])
-            addr_list.append(f"{c['clean_vpo']}, District {c['district']}, Punjab, India")
-            km_list.append(c["km"])
-            
-            excel_hyperlink = f'=HYPERLINK("{c["link"]}", "📍 Open Route Map ({c["km"]})")'
-            link_list.append(excel_hyperlink)
-        else:
-            vpo_list.append("")
-            dist_list.append("")
-            addr_list.append("")
-            km_list.append("")
-            link_list.append("")
+            vpo_list[r_idx] = c["clean_vpo"]
+            dist_list[r_idx] = c["district"]
+            addr_list[r_idx] = f"{c['clean_vpo']}, District {c['district']}, Punjab, India"
+            km_list[r_idx] = c["km"]
+            link_list[r_idx] = f'=HYPERLINK("{c["link"]}", "📍 Open Route Map ({c["km"]})")'
 
     data_df["Extracted Village (VPO)"] = vpo_list
     data_df["District Name"] = dist_list
@@ -202,7 +203,7 @@ def process_single_sheet_robust(sheet_name, df, api_key=""):
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("Multi-Threaded Production Engine — Zero Data Loss")
+st.caption("Multi-Threaded Engine — Deep Grid Header Matching")
 
 st.sidebar.header("Configuration")
 api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password")
@@ -211,13 +212,12 @@ uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing Sheets with Robust Header Matching..."):
-            # Load raw data without assuming header position
+        with st.spinner("Processing Sheets with Grid Alignment..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
             wb = openpyxl.Workbook()
-            wb.remove(wb.active) # Remove default active sheet
+            wb.remove(wb.active)
             
             for sheet in excel_file.sheet_names:
                 sheet_upper = sheet.strip().upper()
@@ -230,15 +230,14 @@ if uploaded_file:
                     
                 ws = wb.create_sheet(title=s_name)
                 
-                # Write rows to openpyxl cleanly without dropping original formatting
-                for row_idx, row in enumerate(processed_df.itertuples(index=False)):
+                for row in processed_df.itertuples(index=False):
                     row_vals = [None if pd.isna(val) else val for val in row]
                     ws.append(row_vals)
 
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! Excel Report Processed without blank data.")
+            st.success("✅ Process Complete!")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
