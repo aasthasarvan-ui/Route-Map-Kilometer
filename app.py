@@ -3,12 +3,11 @@ import pandas as pd
 import openpyxl
 import requests
 import re
-import math
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import io
 
-# Page Configuration
+# Streamlit Page Configuration
 st.set_page_config(
     page_title="ERP Route Sheet Highway Planner Engine",
     page_icon="🚚",
@@ -17,17 +16,15 @@ st.set_page_config(
 
 # Base Origin Depot (Paras Nutritions Pvt Ltd, Moga)
 BASE_DEPOT = "Paras Nutritions Pvt Ltd, Road, Moga, Punjab, India"
-BASE_LAT = 30.8165
-BASE_LON = 75.1717
 
 # -----------------------------------------------------------------------------
-# 100% PURE DYNAMIC MULTI-STAGE GEOCODING ENGINE (0% HARDCODED DATA)
+# 100% PURE DYNAMIC REGEX & GOOGLE MAPS API ENGINE (ZERO HARDCODED DATA)
 # -----------------------------------------------------------------------------
 
 def extract_pure_village_name_dynamic(cell_value):
     """
-    Dynamic RegEx Parser to clean Column H text.
-    Strips ERP codes, LF numbers, AG codes, farmer names, etc.
+    Pure Dynamic RegEx Parser to clean Column H text.
+    Strips noise like LF-9707, AG 473, R-12, RT15, farmer names, etc.
     """
     if not isinstance(cell_value, str) or not cell_value.strip():
         return ""
@@ -48,7 +45,7 @@ def extract_pure_village_name_dynamic(cell_value):
     else:
         raw_vpo = txt
         
-    # 3. Filter noise suffix words
+    # 3. Dynamic word filtering
     words = raw_vpo.split()
     clean_words = []
     for w in words:
@@ -61,22 +58,10 @@ def extract_pure_village_name_dynamic(cell_value):
     return res.title() if res else cell_value.title()
 
 
-def calculate_haversine_road_km(lat1, lon1, lat2, lon2):
-    """Calculates dynamic highway driving KM using Haversine + 1.28 Winding Road factor."""
-    R = 6371.0 # Earth radius in KM
-    dlat = math.radians(lat2 - lat1)
-    dlon = math.radians(lon2 - lon1)
-    a = math.sin(dlat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2)**2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    straight_km = R * c
-    road_km = straight_km * 1.28 # Standard road curvature multiplier
-    return round(road_km, 1)
-
-
-def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
+def live_google_maps_geocoder(vpo_name, full_cell_text, api_key=""):
     """
-    3-Stage Multi-Query Dynamic Resolver (Zero Hardcoding).
-    Guarantees non-blank District and accurate driving KM.
+    100% Dynamic Engine using Google Maps Geocoding & Distance Matrix API.
+    Resolves exact District Name (e.g., Firozpur) and real driving distance (e.g., 87.9 KM).
     """
     if not vpo_name:
         return "Unknown", "N/A", ""
@@ -84,10 +69,14 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
     district_name = "Punjab"
     driving_km = "N/A"
 
-    # Stage 1: Google Maps API Engine (If API Key provided)
+    # Scoped Query to eliminate ambiguity
+    search_address = f"{vpo_name}, Punjab, India"
+
+    # Method 1: Google Maps API Processing
     if api_key and api_key.strip():
         try:
-            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Punjab, India')}&key={api_key}"
+            # 1. Fetch Exact District Name via Geocoding API
+            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(search_address)}&key={api_key}"
             g_resp = requests.get(geo_url, timeout=5).json()
             
             if g_resp.get("status") == "OK" and g_resp.get("results"):
@@ -98,6 +87,8 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
                         break
             
             full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
+            
+            # 2. Fetch Highway Driving KM via Distance Matrix API
             dist_url = f"https://maps.googleapis.com/maps/api/distancematrix/json?origins={urllib.parse.quote(BASE_DEPOT)}&destinations={urllib.parse.quote(full_addr)}&mode=driving&key={api_key}"
             d_resp = requests.get(dist_url, timeout=5).json()
             
@@ -111,61 +102,28 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
         except Exception:
             pass
 
-    # Stage 2: OpenStreetMap Multi-Query Engine (Handles prefixes like Basti, Pindi, etc.)
-    queries = [
-        f"{vpo_name}, Punjab, India",
-        f"{re.sub(r'^(Basti|Pindi|VPO)\s+', '', vpo_name, flags=re.IGNORECASE)}, Punjab, India",
-        f"{vpo_name}, Firozpur Moga Belt, Punjab, India"
-    ]
-    
-    headers = {'User-Agent': 'DynamicMultiStageERPPlanner/13.0'}
-    dest_lat, dest_lon = None, None
-
-    for q in queries:
-        try:
-            osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(q)}&format=json&addressdetails=1&limit=1"
-            res = requests.get(osm_url, headers=headers, timeout=3).json()
+    # Method 2: Dynamic OpenStreetMap Fallback
+    try:
+        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_address)}&format=json&addressdetails=1&limit=1"
+        headers = {'User-Agent': 'DynamicGoogleAPIRoutePlanner/15.0'}
+        res = requests.get(osm_url, headers=headers, timeout=4).json()
+        
+        if res and len(res) > 0:
+            addr = res[0].get("address", {})
+            raw_d = addr.get("county", addr.get("state_district", addr.get("district", "")))
+            if raw_d and "Tehsil" not in raw_d:
+                district_name = raw_d.replace("District", "").strip().title()
             
-            if res and len(res) > 0:
-                addr = res[0].get("address", {})
-                
-                # Dynamic District Extraction Logic
-                raw_d = addr.get("county", addr.get("state_district", addr.get("district", addr.get("subdistrict", ""))))
-                if raw_d and "Tehsil" not in raw_d:
-                    district_name = raw_d.replace("District", "").strip().title()
-                elif addr.get("state_district"):
-                    district_name = addr.get("state_district").replace("District", "").strip().title()
-                
-                dest_lat = float(res[0]["lat"])
-                dest_lon = float(res[0]["lon"])
-                break
-        except Exception:
-            continue
-
-    # Stage 3: Dynamic Road Routing & Highway Calculation
-    if dest_lat and dest_lon:
-        try:
-            osrm_url = f"http://router.project-osrm.org/route/v1/driving/{BASE_LON},{BASE_LAT};{dest_lon},{dest_lat}?overview=false"
-            osrm_res = requests.get(osrm_url, timeout=3).json()
+            dest_lat = float(res[0]["lat"])
+            dest_lon = float(res[0]["lon"])
+            
+            osrm_url = f"http://router.project-osrm.org/route/v1/driving/75.1717,30.8165;{dest_lon},{dest_lat}?overview=false"
+            osrm_res = requests.get(osrm_url, timeout=4).json()
             if osrm_res.get("routes"):
                 meters = osrm_res["routes"][0]["distance"]
                 driving_km = f"{round(meters / 1000.0, 1)} KM"
-        except Exception:
-            pass
-            
-        if driving_km == "N/A":
-            calc_km = calculate_haversine_road_km(BASE_LAT, BASE_LON, dest_lat, dest_lon)
-            driving_km = f"{calc_km} KM"
-
-    # Dynamic fallback if District is still generic "Punjab"
-    if district_name == "Punjab":
-        district_name = "Moga"
-
-    if driving_km == "N/A":
-        # Dynamic fallback based on character hash string
-        hash_val = sum(ord(c) for c in vpo_name)
-        calc_km = round(15.0 + (hash_val % 35) + 0.4, 1)
-        driving_km = f"{calc_km} KM"
+    except Exception:
+        pass
 
     full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
     maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
@@ -174,8 +132,8 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
 
 def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     """
-    STRICT COLUMN H BASE PROCESSOR:
-    Extracts Party / Village Names STRICTLY from Column H (Index 7).
+    STRICT COLUMN H PROCESSOR (Index 7).
+    Extracts village names strictly from Column H with zero hardcoded lookup tables.
     """
     if df_raw.empty or df_raw.shape[1] < 8:
         return sheet_name, df_raw
@@ -202,14 +160,13 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     km_list = [""] * num_rows
     link_list = [""] * num_rows
 
-    # Column Headers Setup
+    # Setup Header Titles
     vpo_list[header_row_idx] = "Extracted Village (VPO)"
     dist_list[header_row_idx] = "District Name"
     addr_list[header_row_idx] = "Exact Google Maps Address"
     km_list[header_row_idx] = "Dist from Base (KM)"
     link_list[header_row_idx] = "Google Maps Directions Link"
 
-    # Extract Unique Parties strictly from Column H
     row_party_map = {}
     unique_parties = set()
 
@@ -226,7 +183,7 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     def fetch_task(party):
         clean_vpo = extract_pure_village_name_dynamic(party)
         if clean_vpo:
-            dist, km, link = live_dynamic_spatial_geocoder(clean_vpo, party, api_key)
+            dist, km, link = live_google_maps_geocoder(clean_vpo, party, api_key)
             cache[party] = {
                 "clean_vpo": clean_vpo,
                 "district": dist,
@@ -234,12 +191,12 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
                 "link": link
             }
 
-    # Parallel Geocoding Threads
+    # Parallel Dynamic Geocoding Threads
     if unique_parties:
         with ThreadPoolExecutor(max_workers=10) as executor:
             executor.map(fetch_task, list(unique_parties))
 
-    # Populate Rows Directly
+    # Populate Data to DataFrame
     for r_idx, party_val in row_party_map.items():
         if party_val in cache:
             c = cache[party_val]
@@ -258,20 +215,20 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     return sheet_name, data_df
 
 # -----------------------------------------------------------------------------
-# STREAMLIT USER INTERFACE
+# STREAMLIT USER DASHBOARD
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("3-Stage Multi-Query Dynamic Engine — Zero Hardcoded Data")
+st.caption("100% Dynamic Engine — Strictly Column H Target")
 
 st.sidebar.header("Configuration")
-api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Add key for Google Maps live matrix or leave blank for Free Multi-Query Engine")
+api_key_input = st.sidebar.text_input("Enter Google Maps API Key:", type="password", help="Enter your Google Maps API key to fetch exact Google driving routes and districts")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing ERP Sheets dynamically across Multi-Stage APIs..."):
+        with st.spinner("Processing ERP Sheets dynamically across Google Maps API..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
@@ -296,7 +253,7 @@ if uploaded_file:
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! Basti Surjitpura and all dynamic villages populated.")
+            st.success("✅ Process Completed!")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
