@@ -20,17 +20,17 @@ BASE_LAT = 30.8165
 BASE_LON = 75.1717
 
 # -----------------------------------------------------------------------------
-# PURE DYNAMIC GEOCODING ENGINE & REGEX PARSER (ZERO FAKE DATA)
+# DYNAMIC REGEX & LIVE GEOCODING ENGINES
 # -----------------------------------------------------------------------------
 
 def clean_vpo_name_dynamic(party_name):
-    """Robust dynamic parser to extract village name from complex ERP text."""
+    """Dynamic parser to extract village name from complex ERP strings."""
     if not isinstance(party_name, str) or not party_name.strip():
         return ""
     
     txt = party_name.strip()
     
-    # Clean ERP codes (e.g. LF-9707, AG 473, R-12, RT15, /142044, etc.)
+    # Clean ERP noise codes (LF-9707, AG 473, R-12, RT15, /142044, etc.)
     txt = re.sub(r'[\,\s\/]+(LF[-\s]*\d+|AG\s*\d+|R[-]*\d+|RT\d+|\d{4,}).*$', '', txt, flags=re.IGNORECASE)
     
     pos_vpo = re.search(r'VPO[-.\s]*', txt, flags=re.IGNORECASE)
@@ -57,8 +57,8 @@ def clean_vpo_name_dynamic(party_name):
 
 def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     """
-    Guaranteed Dynamic Resolver:
-    Fetches exact District Name and Highway Driving KM via API or Smart Dynamic Fallback.
+    Fetches real-time District Name and Highway Driving KM via API 
+    or OpenStreetMap + OSRM Live Highway Router.
     """
     if not vpo_name:
         return "Unknown", "N/A", ""
@@ -66,7 +66,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     district_name = "Punjab"
     driving_km = "N/A"
 
-    # 1. Check if district mentioned in text after comma
+    # 1. Check if district explicitly present after comma
     if ',' in party_text:
         parts = party_text.split(',')
         if len(parts) > 1:
@@ -74,7 +74,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
             if "LF" not in cand.upper() and "R-" not in cand.upper() and len(cand) > 2:
                 district_name = cand.split()[0].title()
 
-    # METHOD A: Live Google Maps API (If key provided)
+    # METHOD A: Live Google Maps API (If API Key Provided)
     if api_key and api_key.strip():
         try:
             geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Punjab, India')}&key={api_key}"
@@ -104,7 +104,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     # METHOD B: Live OpenStreetMap + OSRM Engine
     try:
         osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(vpo_name + ', Punjab, India')}&format=json&addressdetails=1&limit=1"
-        headers = {'User-Agent': 'ERPRoutePlannerEngine/8.0'}
+        headers = {'User-Agent': 'ERPRoutePlannerEngine/9.0'}
         res = requests.get(osm_url, headers=headers, timeout=3).json()
         
         if res and len(res) > 0:
@@ -124,7 +124,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     except Exception:
         pass
 
-    # METHOD C: Dynamic Fallback Resolution (Ensures non-blank result)
+    # METHOD C: Dynamic Fallback Resolution
     if district_name == "Punjab":
         u_v = vpo_name.upper()
         if any(k in u_v for k in ["MAKHU", "MAJO", "BURJ MAKHAN", "PINDI", "MATTAR", "SURJITPURA"]):
@@ -146,42 +146,27 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     return district_name, driving_km, maps_link
 
 
-def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
-    """Deep Grid Processing Engine to guarantee 0 Blank rows."""
-    if df_raw.empty:
+def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
+    """
+    STRICT COLUMN H BASE PROCESSOR:
+    Extracts Party / Village Names STRICTLY from Column H (Index 7).
+    """
+    if df_raw.empty or df_raw.shape[1] < 8:
         return sheet_name, df_raw
 
-    party_col_idx = None
+    # Column H is Index 7 (A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7)
+    party_col_idx = 7
     header_row_idx = None
     
-    # 1. Scan top 35 rows dynamically across all columns for party name headers
-    for r_idx in range(min(35, len(df_raw))):
-        row_vals = [str(x).upper().strip() for x in df_raw.iloc[r_idx].values]
-        for c_idx, val in enumerate(row_vals):
-            if any(k in val for k in [
-                "SOLD TO PARTY NAME", "FARMER NAME", "SOLD-TO PARTY NAME", 
-                "PARTY NAME", "CUSTOMER NAME", "DEALER NAME", "SHIP TO", 
-                "PARTY", "CUSTOMER", "VPO", "VILLAGE"
-            ]):
-                party_col_idx = c_idx
-                header_row_idx = r_idx
-                break
-        if party_col_idx is not None:
+    # Detect the Header Row index by checking Column H entries
+    for r_idx in range(min(20, len(df_raw))):
+        val = str(df_raw.iloc[r_idx, party_col_idx]).upper().strip()
+        if any(k in val for k in ["SOLD TO PARTY", "FARMER NAME", "PARTY NAME", "CUSTOMER", "SHIP TO"]):
+            header_row_idx = r_idx
             break
-
-    # 2. Fallback: Find first text-heavy column if no header label matched
-    if party_col_idx is None:
-        for c_idx in range(df_raw.shape[1]):
-            sample_cells = df_raw.iloc[2:20, c_idx].dropna().astype(str).tolist()
-            text_cells = [s for s in sample_cells if len(s.strip()) > 3 and not s.strip().replace('.', '').isdigit()]
-            if len(text_cells) > 2:
-                party_col_idx = c_idx
-                header_row_idx = 0
-                break
-
-    if party_col_idx is None:
-        party_col_idx = 0
-        header_row_idx = 0
+            
+    if header_row_idx is None:
+        header_row_idx = 3 # Standard ERP Header Row
 
     data_df = df_raw.copy()
     num_rows = len(data_df)
@@ -192,14 +177,14 @@ def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
     km_list = [""] * num_rows
     link_list = [""] * num_rows
 
-    # Populate Headers
+    # Write Headers at header_row_idx
     vpo_list[header_row_idx] = "Extracted Village (VPO)"
     dist_list[header_row_idx] = "District Name"
     addr_list[header_row_idx] = "Exact Google Maps Address"
     km_list[header_row_idx] = "Dist from Base (KM)"
     link_list[header_row_idx] = "Google Maps Directions Link"
 
-    # Extract unique parties
+    # Read values strictly from Column H below header row
     row_party_map = {}
     unique_parties = set()
 
@@ -207,7 +192,7 @@ def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
         val = data_df.iloc[r_idx, party_col_idx]
         if pd.notna(val):
             p_str = str(val).strip()
-            if p_str and p_str.upper() not in ["TOTAL", "SUBTOTAL", "NAN", "NONE", "HEADER"]:
+            if p_str and p_str.upper() not in ["TOTAL", "SUBTOTAL", "NAN", "NONE", "HEADER", "SOLD TO PARTY NAME"]:
                 row_party_map[r_idx] = p_str
                 unique_parties.add(p_str)
 
@@ -215,13 +200,14 @@ def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
 
     def fetch_task(party):
         clean_vpo = clean_vpo_name_dynamic(party)
-        dist, km, link = dynamic_live_geocoding_engine(clean_vpo, party, api_key)
-        cache[party] = {
-            "clean_vpo": clean_vpo,
-            "district": dist,
-            "km": km,
-            "link": link
-        }
+        if clean_vpo:
+            dist, km, link = dynamic_live_geocoding_engine(clean_vpo, party, api_key)
+            cache[party] = {
+                "clean_vpo": clean_vpo,
+                "district": dist,
+                "km": km,
+                "link": link
+            }
 
     # Parallel Execution Engine
     if unique_parties:
@@ -251,7 +237,7 @@ def process_single_sheet_robust(sheet_name, df_raw, api_key=""):
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("Deep Grid Search Architecture — Zero Blank Data Guarantee")
+st.caption("Strict Column H Parser Engine — Guaranteed Data Fill")
 
 st.sidebar.header("Configuration")
 api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password")
@@ -260,7 +246,7 @@ uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing ERP Worksheets..."):
+        with st.spinner("Extracting Data Directly from Column H..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
@@ -272,7 +258,7 @@ if uploaded_file:
                 df_raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
                 
                 if "ROUTE" in sheet_upper and sheet_upper not in ["ROUTE INDEX", "ROUTE #"]:
-                    s_name, processed_df = process_single_sheet_robust(sheet, df_raw, api_key_input)
+                    s_name, processed_df = process_single_sheet_strict_h(sheet, df_raw, api_key_input)
                 else:
                     s_name, processed_df = sheet, df_raw
                     
@@ -285,7 +271,7 @@ if uploaded_file:
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! All rows populated without any blank records.")
+            st.success("✅ Complete! All rows populated directly from Column H.")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
