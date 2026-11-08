@@ -14,27 +14,26 @@ st.set_page_config(
     layout="wide"
 )
 
-# Base Origin Depot Coordinates (Paras Nutritions Pvt Ltd, Moga)
+# Base Origin Depot (Paras Nutritions Pvt Ltd, Moga)
 BASE_DEPOT = "Paras Nutritions Pvt Ltd, Road, Moga, Punjab, India"
 BASE_LAT = 30.8165
 BASE_LON = 75.1717
 
 # -----------------------------------------------------------------------------
-# PURE DYNAMIC LOGIC & LIVE GEOCODING ENGINES (ZERO PREFILLED/HARDCODED DATA)
+# PURE DYNAMIC GEOCODING & BOUNDED SPATIAL LOGIC (ZERO HARDCODED DATA)
 # -----------------------------------------------------------------------------
 
 def extract_pure_village_name_dynamic(cell_value):
     """
-    Pure Dynamic RegEx Parser.
+    Pure Dynamic RegEx Parser to clean Column H text.
     Strips noise like LF-9707, AG 473, R-12, RT15, farmer names, etc.
-    Extracts purely the Village Name without hardcoded lookup lists.
     """
     if not isinstance(cell_value, str) or not cell_value.strip():
         return ""
     
     txt = cell_value.strip()
     
-    # 1. Remove ERP System Noise codes (e.g. LF-9707, AG 473, R-12, RT15, numbers)
+    # 1. Strip ERP System Noise codes (e.g. LF-9707, AG 473, R-12, RT15, numbers)
     txt = re.sub(r'[\,\s\/]+(LF[-\s]*\d+|AG\s*\d+|R[-]*\d+|RT\d+|\d{4,}).*$', '', txt, flags=re.IGNORECASE)
     
     # 2. Extract text after VPO / V.P.O. keyword if present
@@ -61,12 +60,11 @@ def extract_pure_village_name_dynamic(cell_value):
     return res.title() if res else cell_value.title()
 
 
-def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
+def live_bounded_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
     """
-    100% Live Dynamic Resolver (Zero Hardcoding).
-    Resolves real-time District Name and live continuous driving KM via:
-    1. Live Google Maps API (if key provided in sidebar)
-    2. Live OpenStreetMap Geocoding + OSRM Highway Distance Matrix (Free Engine)
+    100% Dynamic Engine (Zero Hardcoding).
+    Uses Bounding Box Scoped Queries for Punjab to ensure accurate District 
+    and Live Highway Driving KM resolution.
     """
     if not vpo_name:
         return "Unknown", "N/A", ""
@@ -74,13 +72,13 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
     district_name = "Punjab"
     driving_km = "N/A"
 
-    # Dynamic search string scoped to Punjab context to eliminate ambiguity
-    search_address = f"{vpo_name}, Punjab, India"
+    # Scoped Query String specifically targetting Punjab locations
+    search_query = f"{vpo_name}, Punjab, India"
 
-    # METHOD A: Live Google Maps API Engine (If API Key provided)
+    # METHOD A: Live Google Maps API (If API Key provided)
     if api_key and api_key.strip():
         try:
-            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(search_address)}&key={api_key}"
+            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(search_query)}&key={api_key}"
             g_resp = requests.get(geo_url, timeout=5).json()
             
             if g_resp.get("status") == "OK" and g_resp.get("results"):
@@ -104,12 +102,18 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
         except Exception:
             pass
 
-    # METHOD B: Live OpenStreetMap + Live OSRM Highway Matrix Engine (100% Free Dynamic API)
+    # METHOD B: Live Bounded OpenStreetMap Geocoding + Live OSRM Router
     try:
-        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_address)}&format=json&addressdetails=1&limit=1"
-        headers = {'User-Agent': 'PureDynamicERPRoutePlanner/11.0'}
+        # Bounding box coordinates added for Malwa Punjab belt to prevent wrong state hits
+        osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_query)}&format=json&addressdetails=1&viewbox=74.0,29.5,76.5,31.5&bounded=1&limit=1"
+        headers = {'User-Agent': 'BoundedDynamicERPRoutePlanner/12.0'}
         res = requests.get(osm_url, headers=headers, timeout=4).json()
         
+        # Fallback without strict bounds if bounded viewbox returns empty
+        if not res:
+            osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(search_query)}&format=json&addressdetails=1&limit=1"
+            res = requests.get(osm_url, headers=headers, timeout=4).json()
+            
         if res and len(res) > 0:
             addr = res[0].get("address", {})
             raw_d = addr.get("county", addr.get("state_district", addr.get("district", "")))
@@ -119,7 +123,7 @@ def live_dynamic_spatial_geocoder(vpo_name, full_cell_text, api_key=""):
             dest_lat = float(res[0]["lat"])
             dest_lon = float(res[0]["lon"])
             
-            # Live Highway Driving Distance via OSRM Server
+            # Live OSRM Highway Engine
             osrm_url = f"http://router.project-osrm.org/route/v1/driving/{BASE_LON},{BASE_LAT};{dest_lon},{dest_lat}?overview=false"
             osrm_res = requests.get(osrm_url, timeout=4).json()
             if osrm_res.get("routes"):
@@ -187,7 +191,7 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
     def fetch_task(party):
         clean_vpo = extract_pure_village_name_dynamic(party)
         if clean_vpo:
-            dist, km, link = live_dynamic_spatial_geocoder(clean_vpo, party, api_key)
+            dist, km, link = live_bounded_spatial_geocoder(clean_vpo, party, api_key)
             cache[party] = {
                 "clean_vpo": clean_vpo,
                 "district": dist,
@@ -223,16 +227,16 @@ def process_single_sheet_strict_h(sheet_name, df_raw, api_key=""):
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("100% Pure Dynamic Logic Engine — 0% Hardcoded Data")
+st.caption("Bounded Spatial Dynamic Logic Engine — 0% Hardcoded Data")
 
 st.sidebar.header("Configuration")
-api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Add key for Google Maps live matrix or leave blank for OpenStreetMap Free Engine")
+api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Add key for Google Maps live matrix or leave blank for Bounded OpenStreetMap Engine")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing ERP Sheets dynamically across Live Highway API..."):
+        with st.spinner("Processing ERP Sheets dynamically across Bounded Highway API..."):
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
@@ -257,7 +261,7 @@ if uploaded_file:
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! Dynamically processed without any prefilled/hardcoded data.")
+            st.success("✅ Complete! Bounded spatial processing finished.")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
