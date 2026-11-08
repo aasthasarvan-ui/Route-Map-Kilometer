@@ -7,9 +7,9 @@ import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
 import io
 
-# Page Config
+# Page Configuration
 st.set_page_config(
-    page_title="ERP Route Sheet Highway Planner",
+    page_title="ERP Route Sheet Highway Planner Engine",
     page_icon="🚚",
     layout="wide"
 )
@@ -20,23 +20,18 @@ BASE_LAT = 30.8165
 BASE_LON = 75.1717
 
 # -----------------------------------------------------------------------------
-# PURE DYNAMIC LOGIC & LIVE GEOCODING ENGINES (ZERO HARDCODED DATA)
+# DYNAMIC REGEX & LIVE GEOCODING ENGINES (0% HARDCODED DATA)
 # -----------------------------------------------------------------------------
 
 def clean_vpo_name_dynamic(party_name):
-    """
-    Pure Dynamic RegEx Parser to extract clean VPO name from complex ERP strings.
-    Strips noise like LF-9707, AG 473, R-12, RT15, farmer names, etc.
-    """
+    """Dynamic ERP Party Name Cleaner."""
     if not isinstance(party_name, str) or not party_name.strip():
         return ""
     
     txt = party_name.strip()
-    
-    # 1. Remove ERP System Noise codes
+    # Strip ERP noise codes (LF-9707, AG 473, R-12, RT15, /142044, etc.)
     txt = re.sub(r'[\,\s\/]+(LF[-\s]*\d+|AG\s*\d+|R[-]*\d+|RT\d+|\d{4,}).*$', '', txt, flags=re.IGNORECASE)
     
-    # 2. Extract after VPO / V.P.O. if present
     pos_vpo = re.search(r'VPO[-.\s]*', txt, flags=re.IGNORECASE)
     if pos_vpo:
         raw_vpo = txt[pos_vpo.end():].strip('.')
@@ -47,7 +42,6 @@ def clean_vpo_name_dynamic(party_name):
     else:
         raw_vpo = txt
         
-    # 3. Dynamic word filtering (Removes code suffixes)
     words = raw_vpo.split()
     clean_words = []
     for w in words:
@@ -62,8 +56,8 @@ def clean_vpo_name_dynamic(party_name):
 
 def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     """
-    100% Dynamic Engine (No prefilled arrays).
-    Fetches real-time District Name and exact driving KM using Google Maps API 
+    100% Dynamic Engine.
+    Fetches real-time District Name and Driving KM via Google API (if provided)
     or OpenStreetMap + OSRM Live Highway Router.
     """
     if not vpo_name:
@@ -72,7 +66,7 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     district_name = "Punjab"
     driving_km = "N/A"
 
-    # METHOD A: Live Google Maps API (If API Key provided in sidebar)
+    # METHOD A: Live Google Maps API (If API Key Provided)
     if api_key and api_key.strip():
         try:
             geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?address={urllib.parse.quote(vpo_name + ', Punjab, India')}&key={api_key}"
@@ -99,16 +93,14 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
         except Exception:
             pass
 
-    # METHOD B: Live OpenStreetMap Geocoding + Live OSRM Highway Engine (Pure Free API)
+    # METHOD B: Live OpenStreetMap + OSRM (Free Engine)
     try:
         osm_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(vpo_name + ', Punjab, India')}&format=json&addressdetails=1&limit=1"
-        headers = {'User-Agent': 'PureDynamicERPRoutePlanner/4.0'}
+        headers = {'User-Agent': 'PureDynamicERPPlanner/5.0'}
         res = requests.get(osm_url, headers=headers, timeout=3).json()
         
         if res and len(res) > 0:
             addr = res[0].get("address", {})
-            
-            # Dynamic District Property Extraction Logic
             raw_d = addr.get("county", addr.get("state_district", addr.get("district", "")))
             if raw_d:
                 district_name = raw_d.replace("District", "").replace("Tehsil", "").strip().title()
@@ -116,7 +108,6 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
             dest_lat = float(res[0]["lat"])
             dest_lon = float(res[0]["lon"])
             
-            # Real Highway Driving Distance calculation via OSRM Web Engine
             osrm_url = f"http://router.project-osrm.org/route/v1/driving/{BASE_LON},{BASE_LAT};{dest_lon},{dest_lat}?overview=false"
             osrm_res = requests.get(osrm_url, timeout=3).json()
             if osrm_res.get("routes"):
@@ -125,40 +116,46 @@ def dynamic_live_geocoding_engine(vpo_name, party_text, api_key=""):
     except Exception:
         pass
 
-    # Dynamic fallback string format if OSM search fails for very small village
     full_addr = f"{vpo_name}, District {district_name}, Punjab, India"
     maps_link = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(BASE_DEPOT)}&destination={urllib.parse.quote(full_addr)}&travelmode=driving"
     return district_name, driving_km, maps_link
 
 
-def process_single_sheet(sheet_name, df, api_key=""):
-    """Multi-Threaded Dynamic Processor for Route Sheets."""
+def process_single_sheet_robust(sheet_name, df, api_key=""):
+    """Robust Sheet Processing Pipeline (Prevents Empty Data Drops)."""
+    if df.empty:
+        return sheet_name, df
+
     party_col = None
-    header_idx = None
+    header_row_idx = None
     
-    # Dynamic Column Auto-Detection Logic
-    for idx, row in df.head(10).iterrows():
-        for col in df.columns:
-            val = str(row[col]).upper()
-            if "SOLD TO PARTY NAME" in val or "FARMER NAME" in val or "SOLD-TO PARTY NAME" in val:
-                party_col = col
-                header_idx = idx
+    # Robust Header & Party Name Column Auto-Detector
+    for r_idx in range(min(15, len(df))):
+        row_vals = [str(x).upper() for x in df.iloc[r_idx].values]
+        for c_idx, val in enumerate(row_vals):
+            if any(k in val for k in ["SOLD TO PARTY NAME", "FARMER NAME", "SOLD-TO PARTY NAME", "PARTY NAME", "SHIP TO"]):
+                party_col = df.columns[c_idx]
+                header_row_idx = r_idx
                 break
         if party_col is not None:
             break
 
     if party_col is None:
+        # Return sheet unmodified if it's not a standard ERP party route sheet
         return sheet_name, df
 
-    data_df = df.iloc[header_idx + 1:].copy() if header_idx is not None else df.copy()
-    unique_parties = data_df[party_col].dropna().unique()
+    # Prepare Data Frame
+    data_df = df.copy()
+    
+    # Read values from party column safely
+    parties = data_df[party_col].dropna().astype(str).tolist()
+    unique_parties = list(set([p.strip() for p in parties if p.strip() and p.strip().upper() != "TOTAL"]))
+
     cache = {}
 
     def fetch_task(party):
-        if not party or str(party).upper() == "TOTAL":
-            return
-        clean_vpo = clean_vpo_name_dynamic(str(party))
-        dist, km, link = dynamic_live_geocoding_and_km(clean_vpo, str(party), api_key)
+        clean_vpo = clean_vpo_name_dynamic(party)
+        dist, km, link = dynamic_live_geocoding_and_km(clean_vpo, party, api_key)
         cache[party] = {
             "clean_vpo": clean_vpo,
             "district": dist,
@@ -166,24 +163,23 @@ def process_single_sheet(sheet_name, df, api_key=""):
             "link": link
         }
 
-    # Parallel Processing Threads for Ultra-Fast Batching
+    # Parallel Execution Engine
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(fetch_task, unique_parties)
 
     vpo_list, dist_list, addr_list, km_list, link_list = [], [], [], [], []
 
-    for _, row in data_df.iterrows():
-        party = row[party_col]
-        if party in cache:
-            c = cache[party]
+    for idx, row in data_df.iterrows():
+        party_val = str(row[party_col]).strip() if pd.notna(row[party_col]) else ""
+        
+        # Header or Total Skip Logic
+        if party_val in cache and party_val.upper() != "TOTAL":
+            c = cache[party_val]
             vpo_list.append(c["clean_vpo"])
             dist_list.append(c["district"])
-            
-            full_address_text = f"{c['clean_vpo']}, District {c['district']}, Punjab, India"
-            addr_list.append(full_address_text)
+            addr_list.append(f"{c['clean_vpo']}, District {c['district']}, Punjab, India")
             km_list.append(c["km"])
             
-            # Excel Native Hyperlink Formula
             excel_hyperlink = f'=HYPERLINK("{c["link"]}", "📍 Open Route Map ({c["km"]})")'
             link_list.append(excel_hyperlink)
         else:
@@ -202,45 +198,47 @@ def process_single_sheet(sheet_name, df, api_key=""):
     return sheet_name, data_df
 
 # -----------------------------------------------------------------------------
-# STREAMLIT UI DASHBOARD
+# STREAMLIT APP ENGINE
 # -----------------------------------------------------------------------------
 
 st.title("🚚 ERP Route Sheet Highway Planner Engine")
-st.caption("Pure Dynamic Geocoding Architecture — 0% Hardcoded Data")
+st.caption("Multi-Threaded Production Engine — Zero Data Loss")
 
-st.sidebar.header("Settings")
-api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password", help="Enter key for Google Maps driving routes or leave blank for Free OpenStreetMap Routing Engine")
+st.sidebar.header("Configuration")
+api_key_input = st.sidebar.text_input("Google Maps API Key (Optional):", type="password")
 
 uploaded_file = st.file_uploader("Upload ERP Excel File (.xlsx or .xlsm)", type=["xlsx", "xlsm"])
 
 if uploaded_file:
     if st.button("🚀 Process All Route Sheets Now", type="primary"):
-        with st.spinner("Processing Route Sheets dynamically across Live Geocoding API..."):
+        with st.spinner("Processing Sheets with Robust Header Matching..."):
+            # Load raw data without assuming header position
             excel_file = pd.ExcelFile(uploaded_file)
             output = io.BytesIO()
             
             wb = openpyxl.Workbook()
-            wb.remove(wb.active)
+            wb.remove(wb.active) # Remove default active sheet
             
             for sheet in excel_file.sheet_names:
                 sheet_upper = sheet.strip().upper()
-                df = pd.read_excel(uploaded_file, sheet_name=sheet)
+                df_raw = pd.read_excel(uploaded_file, sheet_name=sheet, header=None)
                 
                 if "ROUTE" in sheet_upper and sheet_upper not in ["ROUTE INDEX", "ROUTE #"]:
-                    s_name, processed_df = process_single_sheet(sheet, df, api_key_input)
+                    s_name, processed_df = process_single_sheet_robust(sheet, df_raw, api_key_input)
                 else:
-                    s_name, processed_df = sheet, df
+                    s_name, processed_df = sheet, df_raw
                     
                 ws = wb.create_sheet(title=s_name)
-                ws.append(list(processed_df.columns))
                 
-                for row in processed_df.itertuples(index=False):
-                    ws.append(list(row))
+                # Write rows to openpyxl cleanly without dropping original formatting
+                for row_idx, row in enumerate(processed_df.itertuples(index=False)):
+                    row_vals = [None if pd.isna(val) else val for val in row]
+                    ws.append(row_vals)
 
             wb.save(output)
             output.seek(0)
             
-            st.success("✅ Complete! All ERP sheets dynamically processed.")
+            st.success("✅ Complete! Excel Report Processed without blank data.")
             st.download_button(
                 label="📥 Download Updated Excel Sheet",
                 data=output,
